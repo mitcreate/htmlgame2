@@ -98,6 +98,14 @@
     <div id="boostLabel">⚡ NITRO</div>
     <div id="boostTrack"><div id="boostFill"></div></div>
   </div>
+  <div id="musicBtn" onclick="toggleMusic()" style="
+    position:fixed; bottom:28px; left:220px;
+    width:46px; height:46px; border-radius:50%;
+    background:rgba(8,8,12,0.88); border:2px solid #444;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; pointer-events:all; font-size:20px;
+    transition: border-color 0.3s, box-shadow 0.3s;
+  " title="Toggle Music">🔇</div>
 </div>
 
 <div id="mob">
@@ -673,7 +681,7 @@ let camShake=0;
 
 document.getElementById('bestVal').textContent=best+' m';
 
-function startGame(){ document.getElementById('overlay').classList.add('hidden'); running=true; }
+function startGame(){ document.getElementById('overlay').classList.add('hidden'); running=true; startMusic(); }
 function restartGame(){
   document.getElementById('gameover').classList.remove('show');
   distance=0; dodged=0; speed=0; carX=0; carTilt=0; boostEnergy=1; boostActive=false; camShake=0;
@@ -688,13 +696,222 @@ function restartGame(){
   });
   for(let i=0;i<6;i++) spawnObsCar(-40-i*28);
   running=true;
+  startMusic();
 }
 function doGameOver(){
   running=false;
+  // Crash sound
+  if(audioCtx && musicOn){
+    const now = audioCtx.currentTime;
+    masterGain.gain.linearRampToValueAtTime(0.0, now + 0.6);
+    // Crash noise burst
+    const bufSize = audioCtx.sampleRate * 0.5;
+    const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+    const data = buf.getChannelData(0);
+    for(let i=0;i<bufSize;i++) data[i]=(Math.random()*2-1)*Math.max(0,1-i/bufSize*3);
+    const nb = audioCtx.createBufferSource(); nb.buffer=buf;
+    const ng = audioCtx.createGain(); ng.gain.setValueAtTime(1.2,now);
+    nb.connect(ng); ng.connect(audioCtx.destination);
+    nb.start(now); nb.stop(now+0.5);
+    setTimeout(()=>{ if(beatInterval){clearTimeout(beatInterval);beatInterval=null;} musicOn=false; },700);
+  }
   if(distance>best){ best=Math.floor(distance); localStorage.setItem('tdbest',best); document.getElementById('bestVal').textContent=best+' m'; }
   document.getElementById('goDist').textContent=Math.floor(distance);
   document.getElementById('goDodge').textContent=dodged;
   document.getElementById('gameover').classList.add('show');
+}
+
+// ── AUDIO ENGINE ──────────────────────────────────────────────────────────────
+let audioCtx = null, musicOn = false;
+let masterGain, engineOsc, engineGain, bassOsc, bassGain;
+let beatInterval = null, hihatInterval = null;
+let dronePad = null;
+
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  masterGain = audioCtx.createGain();
+  masterGain.gain.setValueAtTime(0.0, audioCtx.currentTime);
+  masterGain.connect(audioCtx.destination);
+
+  // ── ENGINE RUMBLE (sawtooth, pitch tied to speed)
+  engineOsc = audioCtx.createOscillator();
+  engineOsc.type = 'sawtooth';
+  engineOsc.frequency.setValueAtTime(60, audioCtx.currentTime);
+  engineGain = audioCtx.createGain();
+  engineGain.gain.setValueAtTime(0.18, audioCtx.currentTime);
+  const engineFilter = audioCtx.createBiquadFilter();
+  engineFilter.type = 'lowpass'; engineFilter.frequency.value = 400;
+  engineOsc.connect(engineFilter);
+  engineFilter.connect(engineGain);
+  engineGain.connect(masterGain);
+  engineOsc.start();
+
+  // ── BASS DRONE (sub bass pulse)
+  bassOsc = audioCtx.createOscillator();
+  bassOsc.type = 'triangle';
+  bassOsc.frequency.setValueAtTime(55, audioCtx.currentTime);
+  bassGain = audioCtx.createGain();
+  bassGain.gain.setValueAtTime(0.22, audioCtx.currentTime);
+  const bassFilter = audioCtx.createBiquadFilter();
+  bassFilter.type = 'lowpass'; bassFilter.frequency.value = 200;
+  bassOsc.connect(bassFilter);
+  bassFilter.connect(bassGain);
+  bassGain.connect(masterGain);
+  bassOsc.start();
+
+  // ── SYNTH PAD (atmospheric chord)
+  dronePad = [];
+  [130.8, 164.8, 196.0, 261.6].forEach((freq, i) => {
+    const osc = audioCtx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.06, audioCtx.currentTime);
+    const filt = audioCtx.createBiquadFilter();
+    filt.type = 'bandpass'; filt.frequency.value = freq * 1.5; filt.Q.value = 2;
+    osc.connect(filt); filt.connect(g); g.connect(masterGain);
+    osc.start();
+    dronePad.push({ osc, gain: g });
+  });
+
+  startBeat();
+}
+
+function playKick(time) {
+  const osc = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(150, time);
+  osc.frequency.exponentialRampToValueAtTime(40, time + 0.08);
+  g.gain.setValueAtTime(0.6, time);
+  g.gain.exponentialRampToValueAtTime(0.001, time + 0.25);
+  osc.connect(g); g.connect(masterGain);
+  osc.start(time); osc.stop(time + 0.25);
+}
+
+function playSnare(time) {
+  // noise burst
+  const bufSize = audioCtx.sampleRate * 0.12;
+  const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) data[i] = (Math.random() * 2 - 1);
+  const noise = audioCtx.createBufferSource();
+  noise.buffer = buf;
+  const noiseFilter = audioCtx.createBiquadFilter();
+  noiseFilter.type = 'bandpass'; noiseFilter.frequency.value = 3000; noiseFilter.Q.value = 0.8;
+  const noiseGain = audioCtx.createGain();
+  noiseGain.gain.setValueAtTime(0.35, time);
+  noiseGain.gain.exponentialRampToValueAtTime(0.001, time + 0.12);
+  noise.connect(noiseFilter); noiseFilter.connect(noiseGain); noiseGain.connect(masterGain);
+  noise.start(time); noise.stop(time + 0.15);
+}
+
+function playHihat(time, accent) {
+  const bufSize = audioCtx.sampleRate * 0.04;
+  const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) data[i] = (Math.random() * 2 - 1);
+  const noise = audioCtx.createBufferSource();
+  noise.buffer = buf;
+  const filt = audioCtx.createBiquadFilter();
+  filt.type = 'highpass'; filt.frequency.value = 8000;
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(accent ? 0.18 : 0.08, time);
+  g.gain.exponentialRampToValueAtTime(0.001, time + 0.04);
+  noise.connect(filt); filt.connect(g); g.connect(masterGain);
+  noise.start(time); noise.stop(time + 0.05);
+}
+
+function playBassNote(freq, time, dur) {
+  const osc = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  osc.type = 'sawtooth'; osc.frequency.setValueAtTime(freq, time);
+  const f = audioCtx.createBiquadFilter();
+  f.type = 'lowpass'; f.frequency.value = 300;
+  g.gain.setValueAtTime(0.0, time);
+  g.gain.linearRampToValueAtTime(0.28, time + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.001, time + dur);
+  osc.connect(f); f.connect(g); g.connect(masterGain);
+  osc.start(time); osc.stop(time + dur + 0.05);
+}
+
+// Bass line pattern (notes in Hz)
+const bassLine = [55, 55, 73.4, 55, 65.4, 55, 49, 55];
+let beatStep = 0;
+let BPM = 128;
+
+function startBeat() {
+  if (beatInterval) clearInterval(beatInterval);
+  const step = () => {
+    if (!musicOn || !audioCtx) return;
+    const now = audioCtx.currentTime;
+    const beatDur = 60 / BPM;
+    const s = beatStep % 16;
+
+    // Kick on 0, 4, 8, 12
+    if (s === 0 || s === 4 || s === 8 || s === 12) playKick(now);
+    // Snare on 4, 12
+    if (s === 4 || s === 12) playSnare(now);
+    // Hi-hat every step, accent on even
+    playHihat(now, s % 2 === 0);
+    // Bass line
+    playBassNote(bassLine[s % 8], now, beatDur * 0.9);
+
+    beatStep++;
+    // Speed up BPM slightly with speed
+    const targetBPM = 118 + Math.floor((speed / MAX_SPEED) * 40) + (boostActive ? 20 : 0);
+    BPM += (targetBPM - BPM) * 0.1;
+    beatInterval = setTimeout(step, (60000 / BPM) / 2); // 16th notes
+  };
+  beatInterval = setTimeout(step, 10);
+}
+
+function startMusic() {
+  initAudio();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  musicOn = true;
+  masterGain.gain.cancelScheduledValues(audioCtx.currentTime);
+  masterGain.gain.linearRampToValueAtTime(0.85, audioCtx.currentTime + 1.2);
+  document.getElementById('musicBtn').textContent = '🔊';
+  document.getElementById('musicBtn').style.borderColor = '#f5c518';
+  document.getElementById('musicBtn').style.boxShadow = '0 0 12px #f5c51888';
+  startBeat();
+}
+
+function stopMusic() {
+  musicOn = false;
+  if (audioCtx) {
+    masterGain.gain.cancelScheduledValues(audioCtx.currentTime);
+    masterGain.gain.linearRampToValueAtTime(0.0, audioCtx.currentTime + 0.4);
+  }
+  if (beatInterval) { clearTimeout(beatInterval); beatInterval = null; }
+  document.getElementById('musicBtn').textContent = '🔇';
+  document.getElementById('musicBtn').style.borderColor = '#444';
+  document.getElementById('musicBtn').style.boxShadow = 'none';
+}
+
+function toggleMusic() {
+  if (!musicOn) startMusic(); else stopMusic();
+}
+
+// Update engine sound in loop
+function updateAudio(effSpeed, boosting) {
+  if (!audioCtx || !musicOn) return;
+  const now = audioCtx.currentTime;
+  const ratio = effSpeed / MAX_SPEED;
+  // Engine pitch: 55 Hz idle → 280 Hz full speed
+  const engineFreq = 55 + ratio * 225 + (boosting ? 60 : 0);
+  engineOsc.frequency.setTargetAtTime(engineFreq, now, 0.08);
+  engineGain.gain.setTargetAtTime(0.12 + ratio * 0.12, now, 0.1);
+  // Bass drone pitch
+  bassOsc.frequency.setTargetAtTime(50 + ratio * 30, now, 0.2);
+  // Pad swell on boost
+  if (dronePad) {
+    dronePad.forEach(p => {
+      p.gain.gain.setTargetAtTime(boosting ? 0.1 : 0.05, now, 0.3);
+    });
+  }
 }
 
 // ── LOOP ───────────────────────────────────────────────────────────────────────
@@ -821,6 +1038,9 @@ function loop(t){
   document.getElementById('boostFill').style.width=(boostEnergy*100)+'%';
   document.getElementById('boostFill').style.background=boostActive?'linear-gradient(90deg,#ff3300,#ffcc00)':'linear-gradient(90deg,#ff6600,#ffcc00)';
   document.getElementById('speedNum').style.color=boostActive?'#ff8800':'#f5c518';
+
+  // Audio update
+  updateAudio(effSpeed, boostActive);
 
   renderer.render(scene,camera);
 }
