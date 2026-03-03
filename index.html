@@ -243,10 +243,7 @@ sun.shadow.bias=-0.001;
 scene.add(sun);
 
 // Street lamp lights (orange sodium)
-function addStreetLamp(x,z){
-  const pl = new THREE.PointLight(0xff9944,1.5,18,2);
-  pl.position.set(x, 7, z); pl.castShadow=false; scene.add(pl);
-}
+
 
 // ── ROAD & ENVIRONMENT ─────────────────────────────────────────────────────────
 const ROAD_W = 13;
@@ -314,52 +311,81 @@ function buildingTex(r,g,b){
   return new THREE.CanvasTexture(cv);
 }
 
-function addBuilding(x,z){
-  const w=3+Math.random()*6, h=8+Math.random()*35, d=3+Math.random()*6;
-  const r=Math.floor(30+Math.random()*40), g2=Math.floor(30+Math.random()*40), b=Math.floor(40+Math.random()*50);
-  const geo=new THREE.BoxGeometry(w,h,d);
-  const mat=new THREE.MeshStandardMaterial({map:buildingTex(r,g2,b),roughness:0.7,metalness:0.1});
-  const mesh=new THREE.Mesh(geo,mat);
-  mesh.position.set(x,h/2,z); mesh.castShadow=true; mesh.receiveShadow=true;
-  scene.add(mesh);
-  // rooftop detail
-  const roofG=new THREE.BoxGeometry(w*0.4,1.5,d*0.4);
-  const roofM=new THREE.MeshStandardMaterial({color:0x222230,roughness:0.8});
-  const roof=new THREE.Mesh(roofG,roofM);
-  roof.position.set(x,h+0.75,z); scene.add(roof);
-  // antenna
+// buildingTex used by buildCitySlot below
+
+// ── SCROLLING CITY GROUPS ─────────────────────────────────────────────────────
+// Each "slot" is a THREE.Group holding buildings + lamps for one z-strip.
+// We recycle them like road segments.
+
+const CITY_SLOT_LEN = 22;       // z-length per slot
+const NCITY = 14;               // how many slots in the pool
+const citySlots = [];           // array of { group, lightL, lightR }
+
+function buildCitySlot(startZ) {
+  const grp = new THREE.Group();
+
+  // Left side building
+  const wL=3+Math.random()*6, hL=8+Math.random()*35, dL=3+Math.random()*6;
+  const xL=-ROAD_W/2-4-Math.random()*5;
+  const rL=Math.floor(30+Math.random()*40), gL=Math.floor(30+Math.random()*40), bL=Math.floor(40+Math.random()*50);
+  const geoL=new THREE.BoxGeometry(wL,hL,dL);
+  const matL=new THREE.MeshStandardMaterial({map:buildingTex(rL,gL,bL),roughness:0.7,metalness:0.1});
+  const meshL=new THREE.Mesh(geoL,matL); meshL.position.set(xL,hL/2,0); meshL.castShadow=true; meshL.receiveShadow=true; grp.add(meshL);
+  // rooftop
+  const rtLG=new THREE.BoxGeometry(wL*0.4,1.5,dL*0.4);
+  const rtLM=new THREE.MeshStandardMaterial({color:0x222230,roughness:0.8});
+  const rtL=new THREE.Mesh(rtLG,rtLM); rtL.position.set(xL,hL+0.75,0); grp.add(rtL);
+
+  // Right side building
+  const wR=3+Math.random()*6, hR=8+Math.random()*35, dR=3+Math.random()*6;
+  const xR=ROAD_W/2+4+Math.random()*5;
+  const rR=Math.floor(30+Math.random()*40), gR=Math.floor(30+Math.random()*40), bR=Math.floor(40+Math.random()*50);
+  const geoR=new THREE.BoxGeometry(wR,hR,dR);
+  const matR=new THREE.MeshStandardMaterial({map:buildingTex(rR,gR,bR),roughness:0.7,metalness:0.1});
+  const meshR=new THREE.Mesh(geoR,matR); meshR.position.set(xR,hR/2,0); meshR.castShadow=true; meshR.receiveShadow=true; grp.add(meshR);
+  const rtRG=new THREE.BoxGeometry(wR*0.4,1.5,dR*0.4);
+  const rtRM=new THREE.MeshStandardMaterial({color:0x222230,roughness:0.8});
+  const rtR=new THREE.Mesh(rtRG,rtRM); rtR.position.set(xR,hR+0.75,0); grp.add(rtR);
+
+  // Antennas (random)
   if(Math.random()>0.5){
     const ag=new THREE.CylinderGeometry(0.05,0.05,3,6);
     const am=new THREE.MeshStandardMaterial({color:0x888888,metalness:0.8,roughness:0.3});
-    const ant=new THREE.Mesh(ag,am);
-    ant.position.set(x+(Math.random()-0.5)*w*0.3,h+3,z); scene.add(ant);
+    const ant=new THREE.Mesh(ag,am); ant.position.set(xL+(Math.random()-0.5)*wL*0.3,hL+3,0); grp.add(ant);
   }
-}
 
-function addStreetLampPost(x,z){
-  const postG=new THREE.CylinderGeometry(0.07,0.1,8,8);
+  // Street lamp LEFT
   const postM=new THREE.MeshStandardMaterial({color:0x888888,metalness:0.7,roughness:0.4});
-  const post=new THREE.Mesh(postG,postM); post.position.set(x,4,z); post.castShadow=true; scene.add(post);
-  const armG=new THREE.CylinderGeometry(0.04,0.04,2.5,6);
-  const arm=new THREE.Mesh(armG,postM); arm.rotation.z=Math.PI/2; arm.position.set(x+1.2,7.8,z); scene.add(arm);
-  const lampG=new THREE.BoxGeometry(0.5,0.25,0.5);
-  const lampM=new THREE.MeshStandardMaterial({color:0xffffff,emissive:0xff9944,emissiveIntensity:0.8});
-  const lamp=new THREE.Mesh(lampG,lampM); lamp.position.set(x+2.4,7.8,z); scene.add(lamp);
-  addStreetLamp(x+2.4,z);
+  const postLG=new THREE.CylinderGeometry(0.07,0.1,8,8);
+  const postL=new THREE.Mesh(postLG,postM); postL.position.set(-ROAD_W/2-1.5,4,0); postL.castShadow=true; grp.add(postL);
+  const armLG=new THREE.CylinderGeometry(0.04,0.04,2.5,6);
+  const armL=new THREE.Mesh(armLG,postM); armL.rotation.z=Math.PI/2; armL.position.set(-ROAD_W/2+0.7,7.8,0); grp.add(armL);
+  const lampLG=new THREE.BoxGeometry(0.5,0.25,0.5);
+  const lampLM=new THREE.MeshStandardMaterial({color:0xffffff,emissive:0xff9944,emissiveIntensity:0.8});
+  const lampL=new THREE.Mesh(lampLG,lampLM); lampL.position.set(-ROAD_W/2+1.9,7.8,0); grp.add(lampL);
+
+  // Street lamp RIGHT
+  const postRG=new THREE.CylinderGeometry(0.07,0.1,8,8);
+  const postR=new THREE.Mesh(postRG,postM); postR.position.set(ROAD_W/2+1.5,4,0); postR.castShadow=true; grp.add(postR);
+  const armRG=new THREE.CylinderGeometry(0.04,0.04,2.5,6);
+  const armR=new THREE.Mesh(armRG,postM); armR.rotation.z=-Math.PI/2; armR.position.set(ROAD_W/2-0.7,7.8,0); grp.add(armR);
+  const lampRG=new THREE.BoxGeometry(0.5,0.25,0.5);
+  const lampR=new THREE.Mesh(lampRG,lampLM); lampR.position.set(ROAD_W/2-1.9,7.8,0); grp.add(lampR);
+
+  // Point lights for lamps
+  const plL=new THREE.PointLight(0xff9944,1.8,20,2);
+  plL.position.set(-ROAD_W/2+1.9,7.8,0); scene.add(plL);
+  const plR=new THREE.PointLight(0xff9944,1.8,20,2);
+  plR.position.set(ROAD_W/2-1.9,7.8,0); scene.add(plR);
+
+  grp.position.z = startZ;
+  scene.add(grp);
+
+  return { group:grp, lightL:plL, lightR:plR };
 }
 
-// Spawn buildings and lamps
-const buildingSpawns=[];
-for(let z=0;z>-NSEGS*SEG_LEN-100;z-=12){
-  const xL=-ROAD_W/2-5-Math.random()*6;
-  const xR=ROAD_W/2+5+Math.random()*6;
-  addBuilding(xL+Math.random()*2-1, z+Math.random()*8-4);
-  addBuilding(xR+Math.random()*2-1, z+Math.random()*8-4);
-  buildingSpawns.push({z, xL, xR});
-}
-for(let z=0;z>-NSEGS*SEG_LEN;z-=18){
-  addStreetLampPost(-ROAD_W/2-1.5, z);
-  addStreetLampPost(ROAD_W/2+1.5, z);
+for(let i=0;i<NCITY;i++){
+  citySlots.push(buildCitySlot(-i*CITY_SLOT_LEN));
 }
 
 // ── SKY / STARS ────────────────────────────────────────────────────────────────
@@ -654,6 +680,12 @@ function restartGame(){
   playerCar.position.set(0,0,0);
   obstaclePool.forEach(o=>scene.remove(o.mesh)); obstaclePool.length=0;
   particles.forEach(p=>scene.remove(p.mesh)); particles.length=0;
+  citySlots.forEach((slot,i)=>{
+    const z=-i*CITY_SLOT_LEN;
+    slot.group.position.z=z;
+    slot.lightL.position.z=z;
+    slot.lightR.position.z=z;
+  });
   for(let i=0;i<6;i++) spawnObsCar(-40-i*28);
   running=true;
 }
@@ -710,6 +742,19 @@ function loop(t){
     if(seg.position.z>SEG_LEN*1.5){
       seg.position.z-=NSEGS*SEG_LEN;
       if(seg._sidewalks) seg._sidewalks.forEach(s=>s.position.z-=NSEGS*SEG_LEN);
+    }
+  });
+
+  // City scroll (buildings + lamps move with speed)
+  const CITY_TOTAL = NCITY * CITY_SLOT_LEN;
+  citySlots.forEach(slot => {
+    slot.group.position.z += effSpeed * dt;
+    slot.lightL.position.z += effSpeed * dt;
+    slot.lightR.position.z += effSpeed * dt;
+    if(slot.group.position.z > CITY_SLOT_LEN * 2) {
+      slot.group.position.z -= CITY_TOTAL;
+      slot.lightL.position.z -= CITY_TOTAL;
+      slot.lightR.position.z -= CITY_TOTAL;
     }
   });
 
